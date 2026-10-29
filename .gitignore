@@ -8,5 +8,4 @@
 **/.venv/
 **/__pycache__/
 *.pyc
-.github/workflows/ci.yml
 frontend/.git.local-backup/
