@@ -1,0 +1,12 @@
+# Local configuration and generated files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/.venv/
+**/__pycache__/
+*.pyc
+.github/workflows/ci.yml
+frontend/.git.local-backup/
