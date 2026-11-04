@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions
@@ -124,6 +125,28 @@ class OrganizationMembersView(APIView):
             MembershipSerializer(member).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class AvailableMembersView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, organization_id):
+        organization, membership = get_organization_membership(request.user, organization_id)
+        require_role(membership, Membership.Role.OWNER)
+        query = request.query_params.get("q", "").strip()[:100]
+        if len(query) < 2:
+            return Response([])
+
+        active_member_ids = Membership.objects.filter(
+            organization=organization, is_active=True
+        ).values("user_id")
+        users = (
+            get_user_model().objects.filter(is_active=True)
+            .filter(Q(email__icontains=query) | Q(username__icontains=query))
+            .exclude(id__in=active_member_ids)
+            .order_by("email")[:10]
+        )
+        return Response(list(users.values("email", "username", "first_name", "last_name")))
 
 
 class OrganizationMemberDetailView(APIView):

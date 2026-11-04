@@ -34,6 +34,32 @@ class OrganizationEndpointTest(TestCase):
         self.assertEqual(self.client.get(self.detail_url).data["name"], "Acme")
         self.assertEqual(len(self.client.get(self.members_url).data), 3)
 
+    def test_member_list_includes_profile_photo(self):
+        self.manager.avatar_data = b"photo-bytes"
+        self.manager.avatar_content_type = "image/png"
+        self.manager.save(update_fields=["avatar_data", "avatar_content_type"])
+        self.as_user(self.staff)
+        members = self.client.get(self.members_url).data
+        manager = next(member for member in members if member["user"] == self.manager.id)
+        self.assertEqual(manager["avatar_url"], "data:image/png;base64,cGhvdG8tYnl0ZXM=")
+        owner = next(member for member in members if member["user"] == self.owner.id)
+        self.assertIsNone(owner["avatar_url"])
+
+    def test_update_permission_also_allows_reading_organization(self):
+        RoleAccess.objects.create(organization=self.organization, role=Membership.Role.STAFF,
+                                  permissions=["organizations.update"])
+        self.as_user(self.staff)
+        self.assertEqual(self.client.get(self.detail_url).status_code, 200)
+        self.assertEqual(self.client.patch(self.detail_url, {"name": "Updated"}).status_code, 200)
+
+    def test_customer_manage_permission_allows_reading_customers(self):
+        RoleAccess.objects.create(organization=self.organization, role=Membership.Role.STAFF,
+                                  permissions=["customers.manage"])
+        self.as_user(self.staff)
+        headers = {"HTTP_X_ORGANIZATION_ID": str(self.organization.id)}
+        self.assertEqual(self.client.get("/api/v1/customers/", **headers).status_code, 200)
+        self.assertEqual(self.client.post("/api/v1/customers/", {"name": "Customer"}, **headers).status_code, 201)
+
     def test_nonmember_cannot_read_organization(self):
         self.as_user(self.other)
         self.assertEqual(self.client.get(self.detail_url).status_code, 403)
@@ -64,6 +90,29 @@ class OrganizationEndpointTest(TestCase):
         )
         self.assertEqual(self.client.delete(member_url).status_code, 204)
         self.assertFalse(Membership.objects.get(id=member_id).is_active)
+
+    def test_owner_can_search_available_users_by_email_or_username(self):
+        self.other.first_name = "Amina"
+        self.other.save()
+        self.as_user(self.owner)
+        search_url = f"{self.members_url}search/"
+        self.assertEqual(self.client.get(search_url, {"q": "oth"}).data[0]["email"], self.other.email)
+        self.assertEqual(self.client.get(search_url, {"q": "ami"}).data[0]["username"], "Amina")
+        self.assertEqual(self.client.get(search_url, {"q": "example"}).data, [
+            {"email": self.other.email, "username": "Amina", "first_name": "Amina", "last_name": ""}
+        ])
+        self.assertEqual(self.client.get(search_url, {"q": "a"}).data, [])
+
+    def test_search_excludes_inactive_users_and_requires_owner(self):
+        search_url = f"{self.members_url}search/"
+        self.other.is_active = False
+        self.other.save(update_fields=["is_active"])
+        self.as_user(self.owner)
+        self.assertEqual(self.client.get(search_url, {"q": "other"}).data, [])
+        self.as_user(self.manager)
+        self.assertEqual(self.client.get(search_url, {"q": "other"}).status_code, 403)
+        self.as_user(self.other)
+        self.assertEqual(self.client.get(search_url, {"q": "other"}).status_code, 403)
 
     def test_manager_cannot_change_members(self):
         self.as_user(self.manager)

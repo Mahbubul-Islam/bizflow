@@ -47,5 +47,12 @@ def permissions_for(membership):
 
 
 def require_access(membership, permission):
-    if permission not in permissions_for(membership):
+    granted = permissions_for(membership)
+    read_with = {
+        "organizations.view": ("organizations.update",),
+        "inventory.view": ("inventory.manage",),
+        "customers.view": ("customers.manage",),
+        "sales.view": ("sales.manage", "sales.confirm", "sales.cancel", "sales.invoice"),
+    }
+    if permission not in granted and not any(other in granted for other in read_with.get(permission, ())):
         raise PermissionDenied("You do not have permission to perform this action.")

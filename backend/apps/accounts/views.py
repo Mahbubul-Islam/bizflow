@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.utils.decorators import method_decorator
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -12,10 +14,15 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.utils import get_md5_hash_password
-from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from apps.organizations.models import Membership
+from apps.organizations.access import permissions_for
+from allauth.socialaccount.adapter import get_adapter
+from allauth.socialaccount.models import SocialAccount
+from allauth.socialaccount.providers.oauth2.client import OAuth2Error
+import requests
 
-from .serializers import ChangePasswordSerializer, RegisterSerializer, UserSerializer
+from .serializers import ChangePasswordSerializer, RegisterSerializer, UserSerializer, ProfileSerializer
 
 
 def set_jwt_cookies(response, access, refresh=None):
@@ -100,6 +107,65 @@ class LoginView(APIView):
         return response
 
 
+class GoogleLoginView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        credential = request.data.get("credential")
+        if not isinstance(credential, str) or not credential:
+            return Response({"detail": "Google credential is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not settings.GOOGLE_CLIENT_ID:
+            return Response({"detail": "Google sign-in is not configured."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        try:
+            provider = get_adapter().get_provider(request._request, "google")
+            social_login = provider.verify_token(request._request, {"id_token": credential})
+        except (ValidationError, OAuth2Error, requests.RequestException, ValueError):
+            return Response({"detail": "Invalid Google credential."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        email = (social_login.user.email or "").strip().lower()
+        subject = social_login.account.uid
+        if not subject or not email or not any(
+            address.verified and address.email.lower() == email
+            for address in social_login.email_addresses
+        ):
+            return Response({"detail": "A verified Google email is required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        User = get_user_model()
+        try:
+            with transaction.atomic():
+                social_account = SocialAccount.objects.select_related("user").filter(provider="google", uid=subject).first()
+                if social_account is None:
+                    if User.objects.filter(email=email).exists():
+                        return Response(
+                            {"detail": "This email already has a password account. Log in with your password."},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+                    user = User.objects.create_user(
+                        email=email,
+                        password=None,
+                        first_name=(social_login.user.first_name or "")[:150],
+                        last_name=(social_login.user.last_name or "")[:150],
+                    )
+                    SocialAccount.objects.create(
+                        user=user, provider="google", uid=subject,
+                        extra_data=social_login.account.extra_data,
+                    )
+                else:
+                    user = social_account.user
+        except IntegrityError:
+            return Response({"detail": "This Google account could not be linked."}, status=status.HTTP_409_CONFLICT)
+
+        if not user.is_active:
+            return Response({"detail": "This account is inactive."}, status=status.HTTP_403_FORBIDDEN)
+
+        refresh = RefreshToken.for_user(user)
+        response = Response({"success": True, "data": UserSerializer(user).data})
+        set_jwt_cookies(response, access=refresh.access_token, refresh=refresh)
+        return response
+
+
 class RefreshView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -110,7 +176,7 @@ class RefreshView(APIView):
         )
 
         if not token:
-            raise AuthenticationFailed("Refresh token missing.")
+            return Response({"detail": "Refresh token missing."}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
             old_refresh = RefreshToken(token)
@@ -125,19 +191,19 @@ class RefreshView(APIView):
             ).first()
 
             if user is None:
-                raise AuthenticationFailed("Invalid user.")
+                return Response({"detail": "Invalid user."}, status=status.HTTP_401_UNAUTHORIZED)
 
             if api_settings.CHECK_REVOKE_TOKEN and old_refresh.get(
                 api_settings.REVOKE_TOKEN_CLAIM
             ) != get_md5_hash_password(user.password):
-                raise AuthenticationFailed("Refresh token revoked.")
+                return Response({"detail": "Refresh token revoked."}, status=status.HTTP_401_UNAUTHORIZED)
 
             old_refresh.blacklist()
 
             new_refresh = RefreshToken.for_user(user)
 
         except TokenError:
-            raise AuthenticationFailed("Invalid refresh token.")
+            return Response({"detail": "Invalid refresh token."}, status=status.HTTP_401_UNAUTHORIZED)
 
         response = Response({
             "success": True,
@@ -192,6 +258,7 @@ class MeView(APIView):
                 "id": str(membership.organization_id),
                 "name": membership.organization.name,
                 "role": membership.role,
+                "permissions": permissions_for(membership),
             }
             for membership in memberships
         ]
@@ -211,6 +278,17 @@ class MeView(APIView):
             "success": True,
             "data": data,
         })
+
+
+class ProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    def patch(self, request):
+        serializer = ProfileSerializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"success": True, "data": UserSerializer(request.user).data})
 
 
 class ChangePasswordView(APIView):

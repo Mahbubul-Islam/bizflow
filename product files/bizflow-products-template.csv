@@ -1,0 +1,2 @@
+name,sku,cost_price,selling_price,stock_quantity,reorder_level,description,category
+Example product,EX-001,10.00,15.00,25,5,,

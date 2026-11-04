@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    AvailableMembersView,
     OrganizationDetailView,
     OrganizationListCreateView,
     OrganizationMemberDetailView,
@@ -12,6 +13,7 @@ urlpatterns = [
     path("", OrganizationListCreateView.as_view()),
     path("<uuid:organization_id>/", OrganizationDetailView.as_view()),
     path("<uuid:organization_id>/members/", OrganizationMembersView.as_view()),
+    path("<uuid:organization_id>/members/search/", AvailableMembersView.as_view()),
     path("<uuid:organization_id>/roles/permissions/", OrganizationRoleAccessListView.as_view()),
     path(
         "<uuid:organization_id>/roles/<str:role>/permissions/",

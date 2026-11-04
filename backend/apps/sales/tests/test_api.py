@@ -158,3 +158,13 @@ class SalesOrderAPITest(TestCase):
         )
         self.assertEqual(self.client.get(self.url, **self.headers).status_code, 200)
         self.assertEqual(self.create_order().status_code, 403)
+
+    def test_sales_manage_alone_can_read_orders_and_products(self):
+        Membership.objects.filter(user=self.user).update(role=Membership.Role.STAFF)
+        RoleAccess.objects.create(
+            organization=self.organization, role=Membership.Role.STAFF,
+            permissions=["sales.manage"],
+        )
+        self.assertEqual(self.client.get(self.url, **self.headers).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/products/", **self.headers).status_code, 200)
+        self.assertEqual(self.create_order().status_code, 201)

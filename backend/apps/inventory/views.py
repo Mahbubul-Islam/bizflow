@@ -1,5 +1,10 @@
 from rest_framework import viewsets
 from django.db import transaction
+from uuid import UUID
+from django.core.serializers.json import DjangoJSONEncoder
+import json
+from django.db.models import F, Q
+from django.core.paginator import Paginator
 from apps.audit.services import record_audit
 from .models import Category, Product, StockMovement
 from .serializers import (
@@ -9,11 +14,14 @@ from .serializers import (
     StockMovementSerializer,
 )
 from common.permissions import HasOrganizationAccess
+from apps.organizations.access import permissions_for
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 from .services import adjust_stock
+from .product_import import read_product_rows
 
 
 class TenantModelViewSet(viewsets.ModelViewSet):
@@ -22,6 +30,8 @@ class TenantModelViewSet(viewsets.ModelViewSet):
 
     def get_required_access(self):
         action = "view" if self.action in ("list", "retrieve") else "manage"
+        if action == "view" and "sales.manage" in permissions_for(self.request.membership):
+            return "sales.manage"
         return f"{self.access_resource}.{action}"
 
     def get_queryset(self):
@@ -63,9 +73,9 @@ class ProductViewSet(TenantModelViewSet):
 
     @transaction.atomic
     def perform_update(self, serializer):
-        old_values = ProductSerializer(serializer.instance).data
+        old_values = json.loads(json.dumps(ProductSerializer(serializer.instance).data, cls=DjangoJSONEncoder))
         serializer.save()
-        new_values = ProductSerializer(serializer.instance).data
+        new_values = json.loads(json.dumps(ProductSerializer(serializer.instance).data, cls=DjangoJSONEncoder))
         changes = {
             field: {"old": old_values[field], "new": new_values[field]}
             for field in new_values
@@ -92,6 +102,129 @@ class ProductViewSet(TenantModelViewSet):
             entity_id=instance.id,
             changes={"is_active": {"old": True, "new": False}},
         )
+
+
+class BulkProductRowSerializer(ProductSerializer):
+    stock_quantity = serializers.IntegerField(min_value=0, max_value=2147483647)
+
+    class Meta(ProductSerializer.Meta):
+        read_only_fields = ["id", "created_at"]
+
+
+class BulkProductImportView(APIView):
+    permission_classes = [HasOrganizationAccess]
+
+    def get_required_access(self):
+        return "inventory.manage"
+
+    def post(self, request):
+        upload = request.FILES.get("file")
+        if not upload or upload.size > 2 * 1024 * 1024:
+            raise ValidationError({"file": "Upload a CSV or XLSX file smaller than 2 MB."})
+        rows = read_product_rows(upload)
+
+        existing_skus = set(Product.objects.filter(organization=request.organization).values_list("sku", flat=True))
+        categories = {}
+        for category in Category.objects.filter(organization=request.organization, is_active=True):
+            categories.setdefault(category.name.casefold(), []).append(category)
+        seen = set()
+        validated = []
+        for line, row in rows:
+            if None in row:
+                raise ValidationError({"file": f"Row {line} has too many columns."})
+            sku = (row.get("sku") or "").strip()
+            if sku in seen or sku in existing_skus:
+                raise ValidationError({"file": f"Row {line}: SKU '{sku}' already exists."})
+            seen.add(sku)
+            data = {key: value.strip() if value is not None else "" for key, value in row.items()}
+            category_name = data.pop("category", "")
+            if category_name:
+                matches = categories.get(category_name.casefold(), [])
+                if len(matches) != 1:
+                    raise ValidationError({"file": f"Row {line}: category '{category_name}' was not found or is ambiguous."})
+                data["category"] = str(matches[0].id)
+            else:
+                data["category"] = None
+            if not data.get("reorder_level"):
+                data.pop("reorder_level", None)
+            serializer = BulkProductRowSerializer(data=data, context={"request": request})
+            if not serializer.is_valid():
+                raise ValidationError({"file": f"Row {line}: {serializer.errors}"})
+            validated.append(serializer.validated_data)
+
+        with transaction.atomic():
+            for data in validated:
+                stock = data.pop("stock_quantity")
+                product = Product.objects.create(organization=request.organization, stock_quantity=stock, **data)
+                if stock:
+                    StockMovement.objects.create(
+                        organization=request.organization, product=product,
+                        quantity_before=0, quantity_delta=stock, quantity_after=stock,
+                        reason="Opening stock from product import", created_by=request.user,
+                    )
+                record_audit(
+                    organization=request.organization, actor=request.user,
+                    action="PRODUCT_CREATED", entity_type="Product", entity_id=product.id,
+                    changes={"name": {"old": None, "new": product.name}},
+                )
+        return Response({"success": True, "created": len(validated)})
+
+
+class ProductCatalogView(APIView):
+    permission_classes = [HasOrganizationAccess]
+
+    def get_required_access(self):
+        if "sales.manage" in permissions_for(self.request.membership):
+            return "sales.manage"
+        return "inventory.view"
+
+    def get(self, request):
+        try:
+            page_number = int(request.query_params.get("page", "1"))
+        except ValueError as exc:
+            raise ValidationError({"page": "Enter a valid page number."}) from exc
+        if page_number < 1:
+            raise ValidationError({"page": "Enter a valid page number."})
+        queryset = Product.objects.filter(organization=request.organization)
+        query = request.query_params.get("search", "").strip()
+        if query:
+            queryset = queryset.filter(Q(name__icontains=query) | Q(sku__icontains=query))
+        category = request.query_params.get("category")
+        if category == "none":
+            queryset = queryset.filter(category__isnull=True)
+        elif category:
+            try:
+                category_id = UUID(category)
+            except ValueError as exc:
+                raise ValidationError({"category": "Enter a valid category ID."}) from exc
+            queryset = queryset.filter(category_id=category_id)
+        status = request.query_params.get("status", "all")
+        if status not in ("all", "active", "inactive"):
+            raise ValidationError({"status": "Choose all, active, or inactive."})
+        if status != "all":
+            queryset = queryset.filter(is_active=status == "active")
+        stock = request.query_params.get("stock", "all")
+        if stock == "out":
+            queryset = queryset.filter(stock_quantity=0)
+        elif stock == "low":
+            queryset = queryset.filter(stock_quantity__gt=0, stock_quantity__lte=F("reorder_level"))
+        elif stock == "in":
+            queryset = queryset.filter(stock_quantity__gt=F("reorder_level"))
+        elif stock != "all":
+            raise ValidationError({"stock": "Choose all, in, low, or out."})
+        if request.query_params.get("low_stock") == "true":
+            queryset = queryset.filter(is_active=True, stock_quantity__lte=F("reorder_level"))
+        if request.query_params.get("active") == "true":
+            queryset = queryset.filter(is_active=True)
+        paginator = Paginator(queryset.order_by("name", "id"), 10)
+        if page_number > paginator.num_pages:
+            raise ValidationError({"page": "Page does not exist."})
+        page = paginator.page(page_number)
+        return Response({
+            "count": paginator.count,
+            "next": page_number + 1 if page.has_next() else None,
+            "results": ProductSerializer(page.object_list, many=True).data,
+        })
 
 class StockAdjustmentSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Membership, Organization
 from .access import PERMISSION_LABELS
+from apps.accounts.serializers import UserSerializer
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -17,10 +18,14 @@ class MembershipSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source="user.email", read_only=True)
     first_name = serializers.CharField(source="user.first_name", read_only=True)
     last_name = serializers.CharField(source="user.last_name", read_only=True)
+    avatar_url = serializers.SerializerMethodField()
+
+    def get_avatar_url(self, obj):
+        return UserSerializer().get_avatar_url(obj.user)
 
     class Meta:
         model = Membership
-        fields = ["id", "user", "email", "first_name", "last_name", "role", "joined_at"]
+        fields = ["id", "user", "email", "first_name", "last_name", "avatar_url", "role", "joined_at"]
         read_only_fields = fields
 
 
