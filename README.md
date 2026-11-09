@@ -33,9 +33,11 @@ Products at or below their reorder level appear in the purchasing panel for memb
 
 ## Run locally
 
-**Prerequisites:** Python 3.12, Node.js 22, npm, and PostgreSQL. Create a PostgreSQL database and user matching the values in `backend/.env`.
+**Prerequisites:** Python 3.12, Node.js 22, npm, and PostgreSQL. For a local database, create a PostgreSQL database and user matching the values in `backend/.env`.
 
 1. Copy `backend/.env.example` to `backend/.env` and `frontend/.env.example` to `frontend/.env.local`. Set the database credentials and a unique `DJANGO_SECRET_KEY`. Google client IDs are needed only for Google sign in.
+
+   To use Neon, set `DATABASE_URL` in `backend/.env` to the pooled connection string for your project. The URL takes precedence over `DB_*` settings and should include `sslmode=require`. Keep it out of the frontend environment; it contains a database password. Use a separate direct connection URL for tools that require a direct connection.
 2. Install dependencies and start the API:
 
    ```bash
