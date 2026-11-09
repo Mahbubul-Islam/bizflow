@@ -7,7 +7,9 @@ ALLOWED_HOSTS = [
 JWT_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
-SECURE_SSL_REDIRECT = True
+# Render redirects public HTTP requests to HTTPS before forwarding to Django.
+# A second redirect here can loop when requests pass through Vercel's proxy.
+SECURE_SSL_REDIRECT = False
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 frontend_origin = os.getenv(
