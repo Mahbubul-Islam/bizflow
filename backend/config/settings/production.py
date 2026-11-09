@@ -10,6 +10,8 @@ CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-frontend_origin = os.getenv("FRONTEND_ORIGIN", "https://bizflow-blond.vercel.app")
+frontend_origin = os.getenv(
+    "FRONTEND_ORIGIN", "https://bizflow-blond.vercel.app"
+).rstrip("/")
 CSRF_TRUSTED_ORIGINS = [frontend_origin]
 CORS_ALLOWED_ORIGINS = [frontend_origin]
