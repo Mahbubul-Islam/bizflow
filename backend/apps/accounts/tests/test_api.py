@@ -10,14 +10,18 @@ from apps.organizations.models import Membership, Organization
 from allauth.socialaccount.models import SocialAccount
 
 
+def csrf_headers(client):
+    token = client.get("/api/v1/auth/csrf/").data["csrfToken"]
+    return {"HTTP_X_CSRFTOKEN": token}
+
+
 class RegisterCSRFTest(TestCase):
-    def test_registration_reaches_validation_without_csrf_cookie(self):
+    def test_registration_requires_csrf(self):
         client = APIClient(enforce_csrf_checks=True, HTTP_HOST="localhost")
-
         response = client.post("/api/v1/auth/register/", {}, format="json")
-
+        self.assertEqual(response.status_code, 403)
+        response = client.post("/api/v1/auth/register/", {}, format="json", **csrf_headers(client))
         self.assertEqual(response.status_code, 400)
-        self.assertIn("email", response.data)
 
     def test_registration_requires_at_least_six_password_characters(self):
         client = APIClient(HTTP_HOST="localhost")
@@ -25,18 +29,22 @@ class RegisterCSRFTest(TestCase):
             "/api/v1/auth/register/",
             {"email": "short@example.com", "password": "abcde", "password_confirm": "abcde"},
             format="json",
+            **csrf_headers(client),
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("password", response.data)
 
 
 class LoginCSRFTest(SimpleTestCase):
-    def test_login_reaches_validation_without_csrf_cookie(self):
+    def test_login_requires_csrf(self):
         client = APIClient(enforce_csrf_checks=True, HTTP_HOST="localhost")
 
         with patch("apps.accounts.views.authenticate", return_value=None):
             response = client.post("/api/v1/auth/login/", {}, format="json")
 
+        self.assertEqual(response.status_code, 403)
+        with patch("apps.accounts.views.authenticate", return_value=None):
+            response = client.post("/api/v1/auth/login/", {}, format="json", **csrf_headers(client))
         self.assertEqual(response.status_code, 401)
 
 
@@ -45,6 +53,7 @@ class GoogleLoginTest(TestCase):
     def setUp(self):
         self.client = APIClient(HTTP_HOST="localhost")
         self.verified = True
+        self.headers = csrf_headers(self.client)
 
     def google_login(self):
         social_login = SimpleNamespace(
@@ -54,7 +63,7 @@ class GoogleLoginTest(TestCase):
         )
         adapter = SimpleNamespace(get_provider=lambda *_: SimpleNamespace(verify_token=lambda *_: social_login))
         with patch("apps.accounts.views.get_adapter", return_value=adapter):
-            return self.client.post("/api/v1/auth/google/", {"credential": "signed-token"}, format="json")
+            return self.client.post("/api/v1/auth/google/", {"credential": "signed-token"}, format="json", **self.headers)
 
     def test_creates_account_with_google_profile_and_logs_in(self):
         response = self.google_login()
@@ -84,22 +93,25 @@ class GoogleLoginTest(TestCase):
 class RefreshCSRFTest(SimpleTestCase):
     def test_missing_refresh_token_is_unauthorized(self):
         client = APIClient(enforce_csrf_checks=True, HTTP_HOST="localhost")
-        response = client.post("/api/v1/auth/refresh/", {}, format="json")
+        response = client.post("/api/v1/auth/refresh/", {}, format="json", **csrf_headers(client))
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.data["detail"], "Refresh token missing.")
 
-    def test_refresh_reaches_token_validation_without_csrf_header(self):
+    def test_refresh_requires_csrf_before_token_validation(self):
         client = APIClient(enforce_csrf_checks=True, HTTP_HOST="localhost")
         client.cookies["bizflow_refresh"] = "invalid-token"
         refresh_response = client.post(
             "/api/v1/auth/refresh/", {}, format="json"
         )
 
+        self.assertEqual(refresh_response.status_code, 403)
+        refresh_response = client.post("/api/v1/auth/refresh/", {}, format="json", **csrf_headers(client))
         self.assertEqual(refresh_response.status_code, 401)
         self.assertEqual(refresh_response.data["detail"], "Invalid refresh token.")
 
     def test_login_cookie_is_sent_to_refresh_route(self):
         client = APIClient(enforce_csrf_checks=True, HTTP_HOST="localhost")
+        headers = csrf_headers(client)
         user = SimpleNamespace(
             id="00000000-0000-0000-0000-000000000001",
             email="user@example.com",
@@ -117,9 +129,10 @@ class RefreshCSRFTest(SimpleTestCase):
                 "/api/v1/auth/login/",
                 {"email": user.email, "password": "password"},
                 format="json",
+                **headers,
             )
 
-        refresh_response = client.post("/api/v1/auth/refresh/", {}, format="json")
+        refresh_response = client.post("/api/v1/auth/refresh/", {}, format="json", **headers)
 
         self.assertEqual(login_response.status_code, 200)
         self.assertEqual(client.cookies["bizflow_refresh"].value, str(issued_token))
@@ -127,10 +140,11 @@ class RefreshCSRFTest(SimpleTestCase):
 
 
 class LogoutTest(SimpleTestCase):
-    def test_logout_without_csrf_clears_auth_cookies(self):
+    def test_logout_requires_csrf_and_clears_auth_cookies(self):
         client = APIClient(enforce_csrf_checks=True, HTTP_HOST="localhost")
 
-        response = client.post("/api/v1/auth/logout/", {}, format="json")
+        self.assertEqual(client.post("/api/v1/auth/logout/", {}, format="json").status_code, 403)
+        response = client.post("/api/v1/auth/logout/", {}, format="json", **csrf_headers(client))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["message"], "Logged out successfully")
@@ -178,7 +192,7 @@ class ChangePasswordTest(TestCase):
         self.assertNotEqual(self.client.get("/api/v1/auth/me/").status_code, 200)
         self.client.cookies["bizflow_refresh"] = str(self.refresh_token)
         refresh_response = self.client.post(
-            "/api/v1/auth/refresh/", {}, format="json"
+            "/api/v1/auth/refresh/", {}, format="json", HTTP_X_CSRFTOKEN=self.csrf_token
         )
         self.assertEqual(refresh_response.data["detail"], "Refresh token revoked.")
 

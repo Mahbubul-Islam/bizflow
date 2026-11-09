@@ -23,6 +23,7 @@ from allauth.socialaccount.providers.oauth2.client import OAuth2Error
 import requests
 
 from .serializers import ChangePasswordSerializer, RegisterSerializer, UserSerializer, ProfileSerializer
+from .authentication import enforce_csrf
 
 
 def set_jwt_cookies(response, access, refresh=None):
@@ -75,6 +76,7 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        enforce_csrf(request)
         email = request.data.get("email", "").strip().lower()
         password = request.data.get("password", "")
 
@@ -112,6 +114,7 @@ class GoogleLoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        enforce_csrf(request)
         credential = request.data.get("credential")
         if not isinstance(credential, str) or not credential:
             return Response({"detail": "Google credential is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -171,6 +174,7 @@ class RefreshView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        enforce_csrf(request)
         token = request.COOKIES.get(
             settings.JWT_REFRESH_COOKIE
         )
@@ -224,6 +228,7 @@ class LogoutView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        enforce_csrf(request)
         token = request.COOKIES.get(
             settings.JWT_REFRESH_COOKIE
         )
@@ -317,6 +322,7 @@ class RegisterView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        enforce_csrf(request)
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
