@@ -4,6 +4,7 @@ from .views import (
     OrganizationDetailView,
     OrganizationListCreateView,
     OrganizationMemberDetailView,
+    OrganizationMemberAccessView,
     OrganizationMembersView,
     OrganizationRoleAccessDetailView,
     OrganizationRoleAccessListView,
@@ -22,5 +23,9 @@ urlpatterns = [
     path(
         "<uuid:organization_id>/members/<uuid:member_id>/",
         OrganizationMemberDetailView.as_view(),
+    ),
+    path(
+        "<uuid:organization_id>/members/<uuid:member_id>/permissions/",
+        OrganizationMemberAccessView.as_view(),
     ),
 ]

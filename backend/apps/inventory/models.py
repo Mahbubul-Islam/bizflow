@@ -89,3 +89,36 @@ class StockMovement(models.Model):
                 name="movement_delta_nonzero"
             )
         ]
+
+
+class PurchaseOrder(models.Model):
+    class Status(models.TextChoices):
+        ORDERED = "ordered", "Ordered"
+        PARTIALLY_RECEIVED = "partially_received", "Partially received"
+        RECEIVED = "received", "Received"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT)
+    supplier_name = models.CharField(max_length=200)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ORDERED)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class PurchaseOrderItem(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    purchase_order = models.ForeignKey(PurchaseOrder, related_name="items", on_delete=models.PROTECT)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    quantity_ordered = models.PositiveIntegerField()
+    quantity_received = models.PositiveIntegerField(default=0)
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["purchase_order", "product"], name="unique_purchase_order_product"),
+            models.CheckConstraint(condition=Q(quantity_ordered__gt=0), name="purchase_order_quantity_positive"),
+            models.CheckConstraint(condition=Q(unit_cost__gte=0), name="purchase_order_cost_nonnegative"),
+            models.CheckConstraint(condition=Q(quantity_received__lte=models.F("quantity_ordered")), name="purchase_order_received_within_ordered"),
+        ]

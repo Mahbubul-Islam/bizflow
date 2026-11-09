@@ -34,11 +34,13 @@ class StockAdjustmentSerializer(serializers.Serializer):
 
 class StockMovementSerializer(serializers.ModelSerializer):
     product_id = serializers.UUIDField(read_only=True)
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_sku = serializers.CharField(source="product.sku", read_only=True)
 
     class Meta:
         model = StockMovement
         fields = [
-            "id", "product_id", "quantity_before", "quantity_delta",
+            "id", "product_id", "product_name", "product_sku", "quantity_before", "quantity_delta",
             "quantity_after", "reason", "created_at",
         ]
 

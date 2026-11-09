@@ -10,6 +10,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { FormField } from "@/components/forms/form-field";
+import { PasswordField } from "@/components/forms/password-field";
 
 export type LoginValues = { email: string; password: string };
 export function LoginForm({
@@ -42,12 +43,11 @@ export function LoginForm({
 						autoComplete="email"
 						required
 					/>
-					<FormField
+					<PasswordField
 						label="Password"
+						id="login-password"
 						name="password"
-						type="password"
 						autoComplete="current-password"
-						required
 					/>
 					<Button type="submit" disabled={pending} className="w-full">
 						{pending ? "Logging in…" : "Log in"}

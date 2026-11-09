@@ -8,12 +8,12 @@ import { Menu } from "@base-ui/react/menu";
 import { Cell, Pie, PieChart } from "recharts";
 import {
 	Activity,
+	BriefcaseBusiness,
 	ArrowRight,
 	ArrowUpRight,
 	Boxes,
 	ChartNoAxesCombined,
 	Building2,
-	ChevronDown,
 	LayoutDashboard,
 	LogOut,
 	Menu as MenuIcon,
@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/table";
 import {
 	analyticsApi,
+	crmApi,
 	api,
 	apiErrorMessage,
 	authApi,
@@ -73,6 +74,7 @@ import {
 	type Organization,
 	type Customer,
 	type DashboardSummary,
+	type CrmSummary,
 	type Order,
 	type Product,
 	type SalesTrend,
@@ -83,6 +85,8 @@ import { hasWorkspacePermission } from "@/lib/workspace-permissions";
 import { ReportsView } from "@/components/dashboard/reports-view";
 import { ProductsView } from "@/components/dashboard/products-view";
 import { CustomersView } from "@/components/dashboard/customers-view";
+import { CrmView } from "@/components/dashboard/crm-view";
+import { MyFollowUpsBell, MyWorkView } from "@/components/dashboard/my-follow-ups";
 import { OrdersView } from "@/components/dashboard/orders-view";
 import {
 	OrganizationView,
@@ -93,6 +97,8 @@ type Section =
 	| "Overview"
 	| "Products"
 	| "Customers"
+	| "CRM"
+	| "My Work"
 	| "Orders"
 	| "Reports"
 	| "Organization"
@@ -101,6 +107,8 @@ const dashboardSections: Section[] = [
 	"Overview",
 	"Products",
 	"Customers",
+	"CRM",
+	"My Work",
 	"Orders",
 	"Reports",
 	"Organization",
@@ -129,6 +137,7 @@ type DashboardSnapshot = {
 	categories: Category[];
 	organizationDetails?: Organization;
 	members: Member[];
+	crmSummary?: CrmSummary;
 };
 
 const dashboardCache = new Map<
@@ -336,6 +345,8 @@ const nav: { label: Section; icon: typeof LayoutDashboard }[] = [
 	{ label: "Overview", icon: LayoutDashboard },
 	{ label: "Products", icon: Package },
 	{ label: "Customers", icon: Users },
+	{ label: "CRM", icon: Activity },
+	{ label: "My Work", icon: BriefcaseBusiness },
 	{ label: "Orders", icon: ShoppingBag },
 	{ label: "Organization", icon: Building2 },
 	{ label: "Members", icon: ClipboardList },
@@ -344,6 +355,8 @@ const sectionPermission: Record<Section, string> = {
 	Overview: "analytics.view",
 	Products: "inventory.view",
 	Customers: "customers.view",
+	CRM: "crm.view",
+	"My Work": "",
 	Orders: "sales.view",
 	Reports: "analytics.view",
 	Organization: "organizations.view",
@@ -377,6 +390,7 @@ function statusVariant(
 export function Dashboard() {
 	const router = useRouter();
 	const [section, setSection] = useState<Section>("Overview");
+	const [workFocusId, setWorkFocusId] = useState<string>();
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [accountOpen, setAccountOpen] = useState(false);
 	const [search, setSearch] = useState("");
@@ -394,6 +408,7 @@ export function Dashboard() {
 	const [organizationDetails, setOrganizationDetails] =
 		useState<Organization>();
 	const [members, setMembers] = useState<Member[]>([]);
+	const [crmSummary, setCrmSummary] = useState<CrmSummary>();
 	const [dataErrors, setDataErrors] = useState<string[]>([]);
 	const [sessionError, setSessionError] = useState<string>();
 	const [retryKey, setRetryKey] = useState(0);
@@ -466,6 +481,7 @@ export function Dashboard() {
 				setCategories(cached.data.categories);
 				setOrganizationDetails(cached.data.organizationDetails);
 				setMembers(cached.data.members);
+				setCrmSummary(cached.data.crmSummary);
 				setDataErrors([]);
 				setLoading(false);
 				return;
@@ -501,6 +517,9 @@ export function Dashboard() {
 				can("members.view")
 					? organizationsApi.members(organizationId)
 					: Promise.resolve([]),
+				can("crm.view")
+					? crmApi.summary(organizationId)
+					: Promise.resolve(undefined),
 			] as const);
 			if (!active) return;
 			const data: DashboardSnapshot = {
@@ -515,6 +534,7 @@ export function Dashboard() {
 				organizationDetails:
 					results[7].status === "fulfilled" ? results[7].value : undefined,
 				members: results[8].status === "fulfilled" ? results[8].value : [],
+				crmSummary: results[9].status === "fulfilled" ? results[9].value : undefined,
 			};
 			setSummary(data.summary);
 			setTrend(data.trend);
@@ -525,6 +545,7 @@ export function Dashboard() {
 			setCategories(data.categories);
 			setOrganizationDetails(data.organizationDetails);
 			setMembers(data.members);
+			setCrmSummary(data.crmSummary);
 			if (results.every((result) => result.status === "fulfilled")) {
 				dashboardCache.set(cacheKey, {
 					expiresAt: Date.now() + dashboardCacheDuration,
@@ -541,6 +562,7 @@ export function Dashboard() {
 				"Categories",
 				"Organization",
 				"Members",
+				"CRM summary",
 			];
 			setDataErrors(
 				results.flatMap((result, index) =>
@@ -571,9 +593,11 @@ export function Dashboard() {
 	const permissions = new Set(organization?.permissions ?? []);
 	const canView = (next: Section) =>
 		!user
-			? next !== "Organization" && next !== "Members"
-			: hasWorkspacePermission(permissions, sectionPermission[next]);
-	const visibleNav = nav.filter(({ label }) => canView(label));
+			? next !== "Organization" && next !== "Members" && next !== "My Work"
+			: next === "My Work" ? !!organizationId : hasWorkspacePermission(permissions, sectionPermission[next]);
+	const visibleNav = nav.filter(({ label }) =>
+		canView(label) && !(label === "My Work" && organization?.role === "OWNER"),
+	);
 	const activeSection = canView(section)
 		? section
 		: (visibleNav[0]?.label ?? (canView("Reports") ? "Reports" : null));
@@ -931,16 +955,9 @@ export function Dashboard() {
 							onClick={() => setDrawerOpen(true)}>
 							<MenuIcon className="size-5" />
 						</Button>
-						<div>
-							<p className="text-xs text-muted-foreground">
-								Workspace <span className="mx-1">/</span>{" "}
-								{activeSection ?? "Workspace"}
-							</p>
-							<p className="truncate text-sm font-semibold">
-								{organization?.name ?? "BizFlow Studio"}
-							</p>
-						</div>
-						<ChevronDown className="hidden size-4 text-muted-foreground sm:block" />
+						<p className="truncate text-sm font-semibold">
+							Hello{user ? `, ${user.first_name.trim() || user.email.split("@")[0]}` : ""}!
+						</p>
 					</div>
 					<div className="flex items-center gap-3">
 						{user && user.organizations.length > 1 && (
@@ -966,6 +983,7 @@ export function Dashboard() {
 							/>
 						)}
 						<ThemeToggle />
+						{user && organizationId && <MyFollowUpsBell key={organizationId} organizationId={organizationId} onOpen={(targetId) => { setWorkFocusId(targetId); selectSection("My Work"); }} />}
 						{user ? (
 							<Menu.Root>
 								<Menu.Trigger
@@ -1061,16 +1079,6 @@ export function Dashboard() {
 					)}
 					<div className="mb-8 flex flex-wrap items-end justify-between gap-4">
 						<div>
-							<div className="mb-2 flex items-center gap-2">
-								<Badge
-									variant="outline"
-									className="border-primary/20 bg-primary/5 text-primary">
-									{preview ? "DESIGN PREVIEW" : "LIVE WORKSPACE"}
-								</Badge>
-								<span className="text-xs text-muted-foreground">
-									Workspace snapshot
-								</span>
-							</div>
 							<h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
 								{activeSection === "Overview"
 									? "Good to see you"
@@ -1079,19 +1087,21 @@ export function Dashboard() {
 									{activeSection === "Overview" ? "." : ""}
 								</span>
 							</h1>
-							<p className="mt-2 text-sm text-muted-foreground">
-								{activeSection === "Overview"
-									? "Here is what is happening across your business today."
-									: activeSection === "Reports"
-										? "Sales performance and product insights for your workspace."
-										: activeSection
-											? `A clear view of your ${activeSection.toLowerCase()}.`
+							{(activeSection === "Overview" || activeSection === "Reports" || !activeSection) && (
+								<p className="mt-2 text-sm text-muted-foreground">
+									{activeSection === "Overview"
+										? "Here is what is happening across your business today."
+										: activeSection === "Reports"
+											? "Sales performance and product insights for your workspace."
 											: "No sections are available for your role."}
-							</p>
+								</p>
+							)}
 						</div>
 						{activeSection &&
 							activeSection !== "Overview" &&
-							activeSection !== "Reports" && (
+							activeSection !== "Reports" &&
+							activeSection !== "CRM" &&
+							activeSection !== "My Work" && (
 								<div className="relative w-full sm:w-64">
 									<Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
 									<Input
@@ -1112,6 +1122,7 @@ export function Dashboard() {
 					) : activeSection === "Overview" ? (
 						<Overview
 							summary={currentSummary}
+							crmSummary={crmSummary}
 							trend={currentTrend}
 							orders={currentOrders}
 							products={currentProducts}
@@ -1126,6 +1137,7 @@ export function Dashboard() {
 							currency={currency}
 							organizationId={organizationId}
 							canManage={!preview && permissions.has("inventory.manage")}
+							canViewPurchasing={!preview && (permissions.has("inventory.view") || permissions.has("inventory.manage"))}
 							search={search}
 							onSaved={() => {
 								clearDashboardCache();
@@ -1135,6 +1147,9 @@ export function Dashboard() {
 					) : activeSection === "Customers" ? (
 						<CustomersView
 							customers={filteredCustomers}
+							orders={currentOrders}
+							canViewCrm={canView("CRM")}
+							canInvoice={!preview && permissions.has("sales.invoice")}
 							organizationId={organizationId}
 							canManage={!preview && permissions.has("customers.manage")}
 							onSaved={() => {
@@ -1143,13 +1158,20 @@ export function Dashboard() {
 								setRetryKey((value) => value + 1);
 							}}
 						/>
+					) : activeSection === "CRM" ? (
+						<CrmView organizationId={organizationId} customers={currentCustomers} orders={currentOrders} members={members} canManage={!preview && permissions.has("crm.manage")} currency={currency} onSaved={() => { clearDashboardCache(); setDataRefreshKey((value) => value + 1); }} />
+					) : activeSection === "My Work" ? (
+						<MyWorkView organizationId={organizationId} focusId={workFocusId} />
 					) : activeSection === "Reports" ? (
+						<div>
 						<ReportsView
 							trend={currentTrend}
 							topProducts={currentTopProducts}
 							currency={currency}
 							organizationName={organization?.name ?? "BizFlow preview"}
 						/>
+						{crmSummary && <Card className="mt-6"><CardHeader><CardTitle>CRM performance</CardTitle></CardHeader><CardContent className="grid gap-4 sm:grid-cols-3"><p>Open pipeline: {money(crmSummary.pipeline_value, currency)}</p><p>Lead conversion: {crmSummary.conversion_rate}%</p><p>Overdue follow-ups: {crmSummary.overdue_follow_ups}</p></CardContent></Card>}
+						</div>
 					) : activeSection === "Organization" ? (
 						<OrganizationView
 							organization={organizationDetails}
@@ -1190,6 +1212,7 @@ export function Dashboard() {
 
 function Overview({
 	summary,
+	crmSummary,
 	trend,
 	orders,
 	products,
@@ -1198,6 +1221,7 @@ function Overview({
 	canView,
 }: {
 	summary?: DashboardSummary;
+	crmSummary?: CrmSummary;
 	trend: SalesTrend[];
 	orders: OrderRow[];
 	products: ProductRow[];
@@ -1235,6 +1259,7 @@ function Overview({
 			accent: "text-[#5085bd] bg-[#e7f2fd] dark:bg-blue-500/10",
 		},
 	];
+	if (crmSummary) stats.push({ label: "Overdue follow-ups", value: crmSummary.overdue_follow_ups, icon: Activity, note: "CRM tasks needing attention", accent: "text-[#b45309] bg-[#fff2dd] dark:bg-orange-500/10" });
 	const shownTrend = trend
 		.slice(-6)
 		.map((item, index) => ({

@@ -1,7 +1,7 @@
 from rest_framework.routers import DefaultRouter
 from .views import CategoryViewSet, ProductViewSet
 from django.urls import path
-from .views import BulkProductImportView, ProductCatalogView, StockAdjustmentView, StockMovementListView
+from .views import BulkProductImportView, ProductCatalogView, StockAdjustmentView, StockMovementListView, PurchaseOrderListCreateView, PurchaseOrderReceiveView
 
 router = DefaultRouter()
 router.register("categories", CategoryViewSet, basename="category")
@@ -15,4 +15,6 @@ urlpatterns = [
 urlpatterns += [
     path("inventory/adjustments/", StockAdjustmentView.as_view()),
     path("inventory/movements/", StockMovementListView.as_view()),
+    path("inventory/purchase-orders/", PurchaseOrderListCreateView.as_view()),
+    path("inventory/purchase-orders/<uuid:order_id>/receive/", PurchaseOrderReceiveView.as_view()),
 ]

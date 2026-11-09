@@ -10,6 +10,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { FormField } from "@/components/forms/form-field";
+import { PasswordField } from "@/components/forms/password-field";
 
 export type SignupValues = {
 	email: string;
@@ -65,19 +66,19 @@ export function SignupForm({
 						autoComplete="email"
 						required
 					/>
-					<FormField
+					<PasswordField
 						label="Password"
+						id="signup-password"
 						name="password"
-						type="password"
 						autoComplete="new-password"
-						required
+						newPassword
 					/>
-					<FormField
+					<PasswordField
 						label="Confirm password"
+						id="signup-confirm-password"
 						name="password_confirm"
-						type="password"
 						autoComplete="new-password"
-						required
+						newPassword
 					/>
 					<Button type="submit" disabled={pending} className="w-full">
 						{pending ? "Creating account…" : "Create account"}

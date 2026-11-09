@@ -11,6 +11,8 @@ PERMISSION_LABELS = {
     "inventory.manage": "Create, update, and remove inventory; adjust stock",
     "customers.view": "View customers",
     "customers.manage": "Create, update, and remove customers",
+    "crm.view": "View leads, deals, activities, and follow-ups",
+    "crm.manage": "Manage leads, deals, activities, and follow-ups",
     "sales.confirm": "Confirm sales orders",
     "sales.view": "View sales orders",
     "sales.manage": "Create and edit draft sales orders",
@@ -27,6 +29,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "inventory.view",
         "customers.view",
         "customers.manage",
+        "crm.view",
+        "crm.manage",
         "sales.confirm",
         "sales.view",
         "sales.invoice",
@@ -38,6 +42,8 @@ DEFAULT_ROLE_PERMISSIONS = {
 def permissions_for(membership):
     if membership.role == Membership.Role.OWNER:
         return list(PERMISSION_LABELS)
+    if membership.permissions_override is not None:
+        return membership.permissions_override
     configured = RoleAccess.objects.filter(
         organization_id=membership.organization_id, role=membership.role
     ).first()
@@ -52,6 +58,7 @@ def require_access(membership, permission):
         "organizations.view": ("organizations.update",),
         "inventory.view": ("inventory.manage",),
         "customers.view": ("customers.manage",),
+        "crm.view": ("crm.manage",),
         "sales.view": ("sales.manage", "sales.confirm", "sales.cancel", "sales.invoice"),
     }
     if permission not in granted and not any(other in granted for other in read_with.get(permission, ())):

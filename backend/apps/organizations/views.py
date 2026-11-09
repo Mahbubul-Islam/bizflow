@@ -13,6 +13,7 @@ from .serializers import (
     AddMemberSerializer,
     ChangeMemberRoleSerializer,
     MembershipSerializer,
+    MemberAccessSerializer,
     OrganizationSerializer,
     RoleAccessSerializer,
 )
@@ -118,8 +119,9 @@ class OrganizationMembersView(APIView):
             if member.is_active:
                 raise ValidationError({"email": "User is already a member."})
             member.role = serializer.validated_data["role"]
+            member.permissions_override = None
             member.is_active = True
-            member.save(update_fields=["role", "is_active"])
+            member.save(update_fields=["role", "permissions_override", "is_active"])
 
         return Response(
             MembershipSerializer(member).data,
@@ -168,7 +170,8 @@ class OrganizationMemberDetailView(APIView):
         if member.role == Membership.Role.OWNER and new_role != Membership.Role.OWNER:
             require_another_owner(organization, member)
         member.role = new_role
-        member.save(update_fields=["role"])
+        member.permissions_override = None
+        member.save(update_fields=["role", "permissions_override"])
         return Response(MembershipSerializer(member).data)
 
     @transaction.atomic
@@ -184,6 +187,25 @@ class OrganizationMemberDetailView(APIView):
         member.is_active = False
         member.save(update_fields=["is_active"])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class OrganizationMemberAccessView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, organization_id, member_id):
+        organization, membership = get_organization_membership(request.user, organization_id)
+        require_role(membership, Membership.Role.OWNER)
+        member = get_object_or_404(
+            Membership.objects.select_related("user"),
+            id=member_id, organization=organization, is_active=True,
+        )
+        if member.role == Membership.Role.OWNER:
+            raise ValidationError({"permissions": "Owner access cannot be changed."})
+        serializer = MemberAccessSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        member.permissions_override = serializer.validated_data["permissions"]
+        member.save(update_fields=["permissions_override"])
+        return Response(MembershipSerializer(member).data)
 
 
 class OrganizationRoleAccessListView(APIView):

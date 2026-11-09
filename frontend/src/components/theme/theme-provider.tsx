@@ -8,7 +8,10 @@ const ThemeContext = React.createContext<{
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
 	const [theme, setTheme] = React.useState<Theme>("light");
 	React.useEffect(() => {
-		const savedTheme = document.cookie.split("; ").find((part) => part.startsWith("bizflow-theme="))?.split("=")[1];
+		const savedTheme = document.cookie
+			.split("; ")
+			.find((part) => part.startsWith("bizflow-theme="))
+			?.split("=")[1];
 		const resolvedTheme = savedTheme === "dark" ? "dark" : "light";
 		document.documentElement.classList.toggle("dark", resolvedTheme === "dark");
 		queueMicrotask(() => setTheme(resolvedTheme));

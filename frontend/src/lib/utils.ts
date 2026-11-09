@@ -85,8 +85,13 @@ export type Member = {
 	avatar_url: string | null;
 	role: Role;
 	joined_at: ISODateTime;
+	permissions_override: string[] | null;
+	effective_permissions: string[];
 };
-export type AvailableMember = Pick<Member, "email" | "first_name" | "last_name"> & { username: string };
+export type AvailableMember = Pick<
+	Member,
+	"email" | "first_name" | "last_name"
+> & { username: string };
 export type RolePermissions = {
 	available_permissions: Record<string, string>;
 	roles: Record<Role, string[]>;
@@ -105,6 +110,72 @@ export type CustomerInput = Pick<Customer, "name"> &
 	Partial<
 		Pick<Customer, "email" | "phone" | "address" | "notes" | "is_active">
 	>;
+export type Lead = {
+	id: Id;
+	name: string;
+	email: string;
+	phone: string;
+	source: string;
+	notes: string;
+	assigned_to: Id | null;
+	status: "NEW" | "CONTACTED" | "QUALIFIED" | "UNQUALIFIED" | "CONVERTED";
+	customer: Id | null;
+	created_at: ISODateTime;
+};
+export type Deal = {
+	id: Id;
+	title: string;
+	lead: Id | null;
+	customer: Id | null;
+	stage: "NEW" | "CONTACTED" | "PROPOSAL" | "WON" | "LOST";
+	value: Money;
+	expected_close_date: string | null;
+	sales_order: Id | null;
+	notes: string;
+};
+export type CrmActivity = {
+	id: Id;
+	lead: Id | null;
+	customer: Id | null;
+	subject_name: string;
+	kind: "CALL" | "MEETING" | "EMAIL" | "NOTE";
+	description: string;
+	occurred_at: ISODateTime;
+};
+export type FollowUp = {
+	id: Id;
+	lead: Id | null;
+	customer: Id | null;
+	title: string;
+	due_at: ISODateTime;
+	assigned_to: Id;
+	completed_at: ISODateTime | null;
+};
+export type CrmSummary = {
+	total_leads: number;
+	converted_leads: number;
+	conversion_rate: number;
+	pipeline_value: Money;
+	overdue_follow_ups: number;
+};
+export type AssignmentNotification = {
+	id: Id;
+	task_id: Id | null;
+	lead_id: Id | null;
+	title: string;
+	created_at: ISODateTime;
+};
+export type ContactDetails = {
+	name: string;
+	email: string;
+	phone: string;
+	address: string;
+};
+export type MyFollowUps = {
+	tasks: (FollowUp & { contact: ContactDetails })[];
+	leads: Lead[];
+	notifications: AssignmentNotification[];
+};
 export type Category = {
 	id: Id;
 	name: string;
@@ -133,10 +204,16 @@ export type ProductInput = Pick<
 	Partial<
 		Pick<Product, "category" | "description" | "reorder_level" | "is_active">
 	>;
-export type ProductPage = { count: number; next: number | null; results: Product[] };
+export type ProductPage = {
+	count: number;
+	next: number | null;
+	results: Product[];
+};
 export type StockMovement = {
 	id: Id;
 	product_id: Id;
+	product_name: string;
+	product_sku: string;
 	quantity_before: number;
 	quantity_delta: number;
 	quantity_after: number;
@@ -147,6 +224,22 @@ export type StockAdjustment = Pick<
 	StockMovement,
 	"quantity_before" | "quantity_delta" | "quantity_after"
 >;
+export type PurchaseOrder = {
+	id: Id;
+	supplier_name: string;
+	status: "ordered" | "partially_received" | "received";
+	notes: string;
+	created_at: ISODateTime;
+	items: {
+		id: Id;
+		product_id: Id;
+		product_name: string;
+		sku: string;
+		quantity_ordered: number;
+		quantity_received: number;
+		unit_cost: Money;
+	}[];
+};
 export type OrderItem = {
 	product_id: Id;
 	product_name: string;
@@ -218,23 +311,38 @@ export const authApi = {
 	refresh: async () => (await api.post<SuccessMessage>("auth/refresh/")).data,
 	logout: async () => (await api.post<SuccessMessage>("auth/logout/")).data,
 	me: async (organizationId?: string) => {
-		const config = organizationId ? organizationConfig(organizationId) : undefined;
+		const config = organizationId
+			? organizationConfig(organizationId)
+			: undefined;
 		try {
-			return (await api.get<Envelope<CurrentUser>>("auth/me/", config)).data.data;
+			return (await api.get<Envelope<CurrentUser>>("auth/me/", config)).data
+				.data;
 		} catch (error) {
-			if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
+			if (!axios.isAxiosError(error) || error.response?.status !== 401)
+				throw error;
 			try {
 				await api.post<SuccessMessage>("auth/refresh/");
 			} catch (refreshError) {
 				// Older API instances return 403 for these session failures.
-				const detail = axios.isAxiosError(refreshError) ? refreshError.response?.data?.detail : undefined;
-				if (axios.isAxiosError(refreshError) && (
-					refreshError.response?.status === 401 ||
-					(refreshError.response?.status === 403 && ["Refresh token missing.", "Invalid refresh token.", "Refresh token revoked.", "Invalid user."].includes(detail))
-				)) throw error;
+				const detail = axios.isAxiosError(refreshError)
+					? refreshError.response?.data?.detail
+					: undefined;
+				if (
+					axios.isAxiosError(refreshError) &&
+					(refreshError.response?.status === 401 ||
+						(refreshError.response?.status === 403 &&
+							[
+								"Refresh token missing.",
+								"Invalid refresh token.",
+								"Refresh token revoked.",
+								"Invalid user.",
+							].includes(detail)))
+				)
+					throw error;
 				throw refreshError;
 			}
-			return (await api.get<Envelope<CurrentUser>>("auth/me/", config)).data.data;
+			return (await api.get<Envelope<CurrentUser>>("auth/me/", config)).data
+				.data;
 		}
 	},
 	updateProfile: async (input: FormData) =>
@@ -257,7 +365,11 @@ export const organizationsApi = {
 	members: async (id: Id) =>
 		(await api.get<Member[]>(`organizations/${id}/members/`)).data,
 	searchMembers: async (id: Id, query: string) =>
-		(await api.get<AvailableMember[]>(`organizations/${id}/members/search/`, { params: { q: query } })).data,
+		(
+			await api.get<AvailableMember[]>(`organizations/${id}/members/search/`, {
+				params: { q: query },
+			})
+		).data,
 	addMember: async (id: Id, input: { email: string; role?: Role }) =>
 		(await api.post<Member>(`organizations/${id}/members/`, input)).data,
 	changeMemberRole: async (id: Id, memberId: Id, role: Role) =>
@@ -266,6 +378,8 @@ export const organizationsApi = {
 				role,
 			})
 		).data,
+	updateMemberPermissions: async (id: Id, memberId: Id, permissions: string[] | null) =>
+		(await api.patch<Member>(`organizations/${id}/members/${memberId}/permissions/`, { permissions })).data,
 	removeMember: async (id: Id, memberId: Id) => {
 		await api.delete(`organizations/${id}/members/${memberId}/`);
 	},
@@ -307,6 +421,76 @@ export const customersApi = {
 	},
 };
 
+function crmResource<T>(path: string) {
+	return {
+		list: async (orgId: Id): Promise<T[]> =>
+			(await api.get<T[]>(path, organizationConfig(orgId))).data,
+		create: async (orgId: Id, input: Partial<T>): Promise<T> =>
+			(await api.post<T>(path, input, organizationConfig(orgId))).data,
+		update: async (orgId: Id, id: Id, input: Partial<T>): Promise<T> =>
+			(await api.patch<T>(`${path}${id}/`, input, organizationConfig(orgId)))
+				.data,
+	};
+}
+export const crmApi = {
+	leads: crmResource<Lead>("leads/"),
+	deals: crmResource<Deal>("deals/"),
+	activities: crmResource<CrmActivity>("activities/"),
+	followUps: crmResource<FollowUp>("follow-ups/"),
+	convert: async (orgId: Id, id: Id, customer?: Id): Promise<Lead> =>
+		(
+			await api.post<Lead>(
+				`leads/${id}/convert/`,
+				customer ? { customer } : {},
+				organizationConfig(orgId),
+			)
+		).data,
+	complete: async (orgId: Id, id: Id): Promise<FollowUp> =>
+		(
+			await api.post<FollowUp>(
+				`follow-ups/${id}/complete/`,
+				{},
+				organizationConfig(orgId),
+			)
+		).data,
+	summary: async (orgId: Id): Promise<CrmSummary> =>
+		(await api.get<CrmSummary>("crm/summary/", organizationConfig(orgId))).data,
+	myFollowUps: async (orgId: Id): Promise<MyFollowUps> =>
+		(
+			await api.get<MyFollowUps>(
+				"crm/my-follow-ups/",
+				organizationConfig(orgId),
+			)
+		).data,
+	completeMine: async (orgId: Id, id: Id): Promise<FollowUp> =>
+		(
+			await api.post<FollowUp>(
+				`crm/my-follow-ups/${id}/complete/`,
+				{},
+				organizationConfig(orgId),
+			)
+		).data,
+	updateMyLead: async (
+		orgId: Id,
+		id: Id,
+		status: Lead["status"],
+	): Promise<Lead> =>
+		(
+			await api.patch<Lead>(
+				`crm/my-leads/${id}/status/`,
+				{ status },
+				organizationConfig(orgId),
+			)
+		).data,
+	readNotification: async (orgId: Id, id: Id): Promise<void> => {
+		await api.post(
+			`crm/notifications/${id}/read/`,
+			{},
+			organizationConfig(orgId),
+		);
+	},
+};
+
 export const categoriesApi = {
 	list: async (orgId: Id) =>
 		(await api.get<Category[]>("categories/", organizationConfig(orgId))).data,
@@ -330,33 +514,87 @@ export const categoriesApi = {
 };
 
 export const productsApi = {
-	page: async (orgId: Id, page = 1, search = "", options?: { active?: boolean; lowStock?: boolean; category?: string; status?: "all" | "active" | "inactive"; stock?: "all" | "in" | "low" | "out" }): Promise<ProductPage> => {
+	page: async (
+		orgId: Id,
+		page = 1,
+		search = "",
+		options?: {
+			active?: boolean;
+			lowStock?: boolean;
+			category?: string;
+			status?: "all" | "active" | "inactive";
+			stock?: "all" | "in" | "low" | "out";
+		},
+	): Promise<ProductPage> => {
 		try {
-			return (await api.get<ProductPage>("products/catalog/", {
-				...organizationConfig(orgId),
-				params: { page, search, active: options?.active ? "true" : undefined, low_stock: options?.lowStock ? "true" : undefined, category: options?.category || undefined, status: options?.status === "all" ? undefined : options?.status, stock: options?.stock === "all" ? undefined : options?.stock },
-			})).data;
+			return (
+				await api.get<ProductPage>("products/catalog/", {
+					...organizationConfig(orgId),
+					params: {
+						page,
+						search,
+						active: options?.active ? "true" : undefined,
+						low_stock: options?.lowStock ? "true" : undefined,
+						category: options?.category || undefined,
+						status: options?.status === "all" ? undefined : options?.status,
+						stock: options?.stock === "all" ? undefined : options?.stock,
+					},
+				})
+			).data;
 		} catch (error) {
 			// A running backend may predate the catalog route until it is restarted.
-			if (!axios.isAxiosError(error) || error.response?.status !== 404) throw error;
-			const all = (await api.get<Product[]>("products/", organizationConfig(orgId))).data;
+			if (!axios.isAxiosError(error) || error.response?.status !== 404)
+				throw error;
+			const all = (
+				await api.get<Product[]>("products/", organizationConfig(orgId))
+			).data;
 			const query = search.trim().toLowerCase();
-			const filtered = all.filter((product) =>
-				(!options?.active || product.is_active) &&
-				(!options?.lowStock || (product.is_active && product.stock_quantity <= product.reorder_level)) &&
-				(!options?.category || (options.category === "none" ? product.category === null : product.category === options.category)) &&
-				(!options?.status || options.status === "all" || product.is_active === (options.status === "active")) &&
-				(!options?.stock || options.stock === "all" || (options.stock === "out" ? product.stock_quantity === 0 : options.stock === "low" ? product.stock_quantity > 0 && product.stock_quantity <= product.reorder_level : product.stock_quantity > product.reorder_level)) &&
-				(!query || `${product.name} ${product.sku}`.toLowerCase().includes(query)),
-			).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+			const filtered = all
+				.filter(
+					(product) =>
+						(!options?.active || product.is_active) &&
+						(!options?.lowStock ||
+							(product.is_active &&
+								product.stock_quantity <= product.reorder_level)) &&
+						(!options?.category ||
+							(options.category === "none"
+								? product.category === null
+								: product.category === options.category)) &&
+						(!options?.status ||
+							options.status === "all" ||
+							product.is_active === (options.status === "active")) &&
+						(!options?.stock ||
+							options.stock === "all" ||
+							(options.stock === "out"
+								? product.stock_quantity === 0
+								: options.stock === "low"
+									? product.stock_quantity > 0 &&
+										product.stock_quantity <= product.reorder_level
+									: product.stock_quantity > product.reorder_level)) &&
+						(!query ||
+							`${product.name} ${product.sku}`.toLowerCase().includes(query)),
+				)
+				.sort(
+					(a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+				);
 			const start = (page - 1) * 10;
-			return { count: filtered.length, next: start + 10 < filtered.length ? page + 1 : null, results: filtered.slice(start, start + 10) };
+			return {
+				count: filtered.length,
+				next: start + 10 < filtered.length ? page + 1 : null,
+				results: filtered.slice(start, start + 10),
+			};
 		}
 	},
 	importFile: async (orgId: Id, file: File) => {
 		const body = new FormData();
 		body.set("file", file);
-		return (await api.post<{ success: boolean; created: number }>("products/import/", body, organizationConfig(orgId))).data;
+		return (
+			await api.post<{ success: boolean; created: number }>(
+				"products/import/",
+				body,
+				organizationConfig(orgId),
+			)
+		).data;
 	},
 	list: async (orgId: Id) =>
 		(await api.get<Product[]>("products/", organizationConfig(orgId))).data,
@@ -379,6 +617,40 @@ export const productsApi = {
 };
 
 export const inventoryApi = {
+	purchaseOrders: async (orgId: Id) =>
+		(
+			await api.get<PurchaseOrder[]>(
+				"inventory/purchase-orders/",
+				organizationConfig(orgId),
+			)
+		).data,
+	createPurchaseOrder: async (
+		orgId: Id,
+		input: {
+			supplier_name: string;
+			notes?: string;
+			items: { product_id: Id; quantity_ordered: number; unit_cost: string }[];
+		},
+	) =>
+		(
+			await api.post<PurchaseOrder>(
+				"inventory/purchase-orders/",
+				input,
+				organizationConfig(orgId),
+			)
+		).data,
+	receivePurchaseOrder: async (
+		orgId: Id,
+		orderId: Id,
+		items: { item_id: Id; quantity: number }[],
+	) =>
+		(
+			await api.post<PurchaseOrder>(
+				`inventory/purchase-orders/${orderId}/receive/`,
+				{ items },
+				organizationConfig(orgId),
+			)
+		).data,
 	adjustStock: async (
 		orgId: Id,
 		input: { product_id: Id; quantity_delta: number; reason: string },
@@ -470,13 +742,15 @@ export const analyticsApi = {
 };
 
 export const auditApi = {
-	list: async (orgId: Id) =>
+	page: async (orgId: Id, page = 1) =>
 		(
-			await api.get<Envelope<AuditLog[]>>(
-				"audit-logs/",
-				organizationConfig(orgId),
-			)
-		).data.data,
+			await api.get<
+				Envelope<AuditLog[]> & { count: number; next: number | null }
+			>("audit-logs/", {
+				...organizationConfig(orgId),
+				params: { page },
+			})
+		).data,
 };
 
 export function apiErrorMessage(error: unknown): string {

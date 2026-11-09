@@ -10,7 +10,7 @@ from apps.organizations.models import Membership, Organization
 from allauth.socialaccount.models import SocialAccount
 
 
-class RegisterCSRFTest(SimpleTestCase):
+class RegisterCSRFTest(TestCase):
     def test_registration_reaches_validation_without_csrf_cookie(self):
         client = APIClient(enforce_csrf_checks=True, HTTP_HOST="localhost")
 
@@ -18,6 +18,16 @@ class RegisterCSRFTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("email", response.data)
+
+    def test_registration_requires_at_least_six_password_characters(self):
+        client = APIClient(HTTP_HOST="localhost")
+        response = client.post(
+            "/api/v1/auth/register/",
+            {"email": "short@example.com", "password": "abcde", "password_confirm": "abcde"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password", response.data)
 
 
 class LoginCSRFTest(SimpleTestCase):
@@ -183,6 +193,11 @@ class ChangePasswordTest(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("new_password_confirm", response.data)
+
+    def test_rejects_password_shorter_than_six_characters(self):
+        response = self.post_change(new_password="abcde", new_password_confirm="abcde")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("new_password", response.data)
 
 
 class ProfileTest(TestCase):

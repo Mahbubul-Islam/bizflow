@@ -22,6 +22,11 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from .services import adjust_stock
 from .product_import import read_product_rows
+from .purchasing import (
+    PurchaseOrderCreateSerializer, PurchaseOrderSerializer, ReceiptSerializer,
+    create_purchase_order, receive_purchase_order,
+)
+from .models import PurchaseOrder
 
 
 class TenantModelViewSet(viewsets.ModelViewSet):
@@ -269,7 +274,7 @@ class StockMovementListView(APIView):
     def get(self, request):
         movements = StockMovement.objects.filter(
             organization=request.organization
-        ).order_by("-created_at", "-id")
+        ).select_related("product").order_by("-created_at", "-id")
 
         filter_serializer = StockMovementFilterSerializer(data=request.query_params)
         filter_serializer.is_valid(raise_exception=True)
@@ -283,3 +288,38 @@ class StockMovementListView(APIView):
             "success": True,
             "data": StockMovementSerializer(movements, many=True).data,
         })
+
+
+class PurchaseOrderListCreateView(APIView):
+    permission_classes = [HasOrganizationAccess]
+
+    def get_required_access(self):
+        return "inventory.view" if self.request.method == "GET" else "inventory.manage"
+
+    def get(self, request):
+        orders = PurchaseOrder.objects.filter(organization=request.organization).prefetch_related(
+            "items__product"
+        ).order_by("-created_at", "-id")
+        return Response(PurchaseOrderSerializer(orders, many=True).data)
+
+    def post(self, request):
+        serializer = PurchaseOrderCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        order = create_purchase_order(organization=request.organization, user=request.user, data=serializer.validated_data)
+        return Response(PurchaseOrderSerializer(PurchaseOrder.objects.prefetch_related("items__product").get(id=order.id)).data, status=201)
+
+
+class PurchaseOrderReceiveView(APIView):
+    permission_classes = [HasOrganizationAccess]
+
+    def get_required_access(self):
+        return "inventory.manage"
+
+    def post(self, request, order_id):
+        serializer = ReceiptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        order = receive_purchase_order(
+            organization=request.organization, order_id=order_id,
+            user=request.user, items=serializer.validated_data["items"],
+        )
+        return Response(PurchaseOrderSerializer(PurchaseOrder.objects.prefetch_related("items__product").get(id=order.id)).data)

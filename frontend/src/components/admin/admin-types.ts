@@ -1,15 +1,18 @@
-import type { AuditLog, Category, Customer, Member, Order, Organization, Product, RolePermissions, StockMovement } from "@/lib/utils";
+import type {
+	AuditLog,
+	Member,
+	RolePermissions,
+} from "@/lib/utils";
 
 export type AdminData = {
-  organization: Organization;
-  members: Member[];
-  permissions: RolePermissions;
-  categories: Category[];
-  products: Product[];
-  movements: StockMovement[];
-  customers: Customer[];
-  orders: Order[];
-  audit: AuditLog[];
+	members: Member[];
+	permissions: RolePermissions;
+	audit: AuditLog[];
+	auditCount: number;
+	auditNext: number | null;
 };
 
-export type AdminAction = (label: string, operation: () => Promise<unknown>) => Promise<boolean>;
+export type AdminAction = (
+	label: string,
+	operation: () => Promise<unknown>,
+) => Promise<boolean>;

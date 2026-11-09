@@ -167,6 +167,38 @@ class OrganizationEndpointTest(TestCase):
         self.assertEqual(self.client.get("/api/v1/products/", **headers).status_code, 403)
         self.assertEqual(self.client.post("/api/v1/customers/", {}, **headers).status_code, 403)
 
+    def test_owner_can_override_one_members_access_and_restore_role_defaults(self):
+        access_url = f"{self.members_url}{self.staff_member.id}/permissions/"
+        headers = {"HTTP_X_ORGANIZATION_ID": str(self.organization.id)}
+        self.as_user(self.owner)
+        response = self.client.patch(
+            access_url, {"permissions": ["customers.view"]}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["effective_permissions"], ["customers.view"])
+        self.assertEqual(response.data["permissions_override"], ["customers.view"])
+
+        self.as_user(self.staff)
+        self.assertEqual(self.client.get("/api/v1/customers/", **headers).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/products/", **headers).status_code, 403)
+        self.as_user(self.manager)
+        self.assertEqual(self.client.get("/api/v1/products/", **headers).status_code, 200)
+
+        self.as_user(self.owner)
+        response = self.client.patch(access_url, {"permissions": None}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["permissions_override"])
+        self.assertIn("inventory.view", response.data["effective_permissions"])
+
+    def test_member_override_requires_owner_and_cannot_change_owner_access(self):
+        access_url = f"{self.members_url}{self.staff_member.id}/permissions/"
+        self.as_user(self.manager)
+        self.assertEqual(self.client.patch(access_url, {"permissions": []}, format="json").status_code, 403)
+        self.as_user(self.owner)
+        owner_url = f"{self.members_url}{self.owner_member.id}/permissions/"
+        self.assertEqual(self.client.patch(owner_url, {"permissions": []}, format="json").status_code, 400)
+        self.assertEqual(self.client.patch(access_url, {"permissions": ["invalid"]}, format="json").status_code, 400)
+
     def test_nonowner_cannot_configure_access_or_change_owner_access(self):
         staff_url = f"{self.detail_url}roles/STAFF/permissions/"
         self.as_user(self.manager)
