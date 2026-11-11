@@ -15,5 +15,9 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 frontend_origin = os.getenv(
     "FRONTEND_ORIGIN", "https://bizflow-blond.vercel.app"
 ).rstrip("/")
-CSRF_TRUSTED_ORIGINS = [frontend_origin]
-CORS_ALLOWED_ORIGINS = [frontend_origin]
+frontend_origins = list(dict.fromkeys([
+    frontend_origin,
+    "https://bizflow-mpigpudsg-mahbubul.vercel.app",
+]))
+CSRF_TRUSTED_ORIGINS = frontend_origins
+CORS_ALLOWED_ORIGINS = frontend_origins
