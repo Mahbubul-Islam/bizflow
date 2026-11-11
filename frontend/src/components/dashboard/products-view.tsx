@@ -82,6 +82,7 @@ export function ProductsView({
 	const [success, setSuccess] = useState<string>();
 	const [deleting, setDeleting] = useState<Product | null>(null);
 	const [importing, setImporting] = useState(false);
+	const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 	const [importOpen, setImportOpen] = useState(false);
 	const [catalog, setCatalog] = useState<Product[]>([]);
 	const [catalogPage, setCatalogPage] = useState(1);
@@ -251,10 +252,11 @@ export function ProductsView({
 
 	async function importFile(file: File) {
 		setImporting(true);
+		setUploadProgress(0);
 		setError(undefined);
 		setSuccess(undefined);
 		try {
-			const result = await productsApi.importFile(organizationId, file);
+			const result = await productsApi.importFile(organizationId, file, setUploadProgress);
 			setSuccess(
 				`${result.created} products and their opening stock imported.`,
 			);
@@ -265,6 +267,7 @@ export function ProductsView({
 			setError(apiErrorMessage(cause));
 		} finally {
 			setImporting(false);
+			setUploadProgress(null);
 		}
 	}
 
@@ -494,7 +497,7 @@ export function ProductsView({
 							<p className="text-sm text-muted-foreground">
 								Required columns: name, sku, cost_price, selling_price,
 								stock_quantity. Optional: reorder_level, description, category.
-								Each SKU must be unique. The first sheet is used, with up to 500
+								Missing categories are created automatically. Each SKU must be unique. The first sheet is used, with up to 500
 								products per file.
 							</p>
 							{categories.some((item) => item.is_active) && (
@@ -529,6 +532,12 @@ export function ProductsView({
 									Download CSV template
 								</a>
 							</div>
+							{importing && (
+								<div role="status" className="space-y-1 text-sm">
+									<p>{uploadProgress === 100 ? "Upload complete. Importing products and categories..." : `Uploading file: ${uploadProgress ?? 0}%`}</p>
+									<progress className="w-full" max={100} value={uploadProgress ?? 0} aria-label="Excel upload progress" />
+								</div>
+							)}
 						</CardContent>
 					)}
 				</Card>

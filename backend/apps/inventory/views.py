@@ -130,10 +130,11 @@ class BulkProductImportView(APIView):
 
         existing_skus = set(Product.objects.filter(organization=request.organization).values_list("sku", flat=True))
         categories = {}
-        for category in Category.objects.filter(organization=request.organization, is_active=True):
+        for category in Category.objects.filter(organization=request.organization):
             categories.setdefault(category.name.casefold(), []).append(category)
         seen = set()
         validated = []
+        new_categories = {}
         for line, row in rows:
             if None in row:
                 raise ValidationError({"file": f"Row {line} has too many columns."})
@@ -145,20 +146,33 @@ class BulkProductImportView(APIView):
             category_name = data.pop("category", "")
             if category_name:
                 matches = categories.get(category_name.casefold(), [])
-                if len(matches) != 1:
-                    raise ValidationError({"file": f"Row {line}: category '{category_name}' was not found or is ambiguous."})
-                data["category"] = str(matches[0].id)
+                if len(matches) > 1:
+                    raise ValidationError({"file": f"Row {line}: category '{category_name}' is ambiguous."})
+                if not matches and len(category_name) > 150:
+                    raise ValidationError({"file": f"Row {line}: category must be at most 150 characters."})
+                if not matches:
+                    new_categories.setdefault(category_name.casefold(), category_name)
             else:
-                data["category"] = None
+                category_name = None
+            data["category"] = str(matches[0].id) if category_name and matches else None
             if not data.get("reorder_level"):
                 data.pop("reorder_level", None)
             serializer = BulkProductRowSerializer(data=data, context={"request": request})
             if not serializer.is_valid():
                 raise ValidationError({"file": f"Row {line}: {serializer.errors}"})
-            validated.append(serializer.validated_data)
+            validated.append((serializer.validated_data, category_name.casefold() if category_name else None))
 
         with transaction.atomic():
-            for data in validated:
+            for key, name in new_categories.items():
+                category = Category.objects.create(organization=request.organization, name=name)
+                categories[key] = [category]
+            for data, category_key in validated:
+                if category_key:
+                    category = categories[category_key][0]
+                    if not category.is_active:
+                        category.is_active = True
+                        category.save(update_fields=["is_active"])
+                    data["category"] = category
                 stock = data.pop("stock_quantity")
                 product = Product.objects.create(organization=request.organization, stock_quantity=stock, **data)
                 if stock:

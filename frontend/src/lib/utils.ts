@@ -585,14 +585,19 @@ export const productsApi = {
 			};
 		}
 	},
-	importFile: async (orgId: Id, file: File) => {
+	importFile: async (orgId: Id, file: File, onUploadProgress?: (percent: number) => void) => {
 		const body = new FormData();
 		body.set("file", file);
 		return (
 			await api.post<{ success: boolean; created: number }>(
 				"products/import/",
 				body,
-				organizationConfig(orgId),
+				{
+					...organizationConfig(orgId),
+					onUploadProgress: (event) => {
+						if (event.total) onUploadProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+					},
+				},
 			)
 		).data;
 	},
