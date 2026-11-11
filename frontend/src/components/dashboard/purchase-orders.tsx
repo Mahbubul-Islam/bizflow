@@ -41,7 +41,7 @@ export function PurchaseOrders({
 	const [orders, setOrders] = useState<PurchaseOrder[]>([]);
 	const [selectedProduct, setSelectedProduct] = useState("");
 	const [supplier, setSupplier] = useState("");
-	const [quantity, setQuantity] = useState(1);
+	const [quantity, setQuantity] = useState("1");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
@@ -52,7 +52,7 @@ export function PurchaseOrders({
 		remaining: number;
 		productName: string;
 	} | null>(null);
-	const [receiptQuantity, setReceiptQuantity] = useState(1);
+	const [receiptQuantity, setReceiptQuantity] = useState("1");
 
 	const reload = useCallback(async () => {
 		const [purchaseOrders, firstPage] = await Promise.all([
@@ -105,13 +105,13 @@ export function PurchaseOrders({
 				items: [
 					{
 						product_id: product.id,
-						quantity_ordered: quantity,
+						quantity_ordered: Number(quantity),
 						unit_cost: product.cost_price,
 					},
 				],
 			});
 			setSupplier("");
-			setQuantity(1);
+			setQuantity("1");
 			setNotice("Purchase order created.");
 			await reload();
 		} catch (cause) {
@@ -231,7 +231,7 @@ export function PurchaseOrders({
 									min="1"
 									step="1"
 									value={quantity}
-									onChange={(event) => setQuantity(Number(event.target.value))}
+									onChange={(event) => setQuantity(event.target.value)}
 									required
 									className="mt-1"
 								/>
@@ -239,7 +239,7 @@ export function PurchaseOrders({
 							<div className="flex items-end">
 								<Button
 									type="submit"
-									disabled={busy || !selectedProduct || quantity < 1}>
+									disabled={busy || !selectedProduct || !Number.isInteger(Number(quantity)) || Number(quantity) < 1}>
 									{busy ? "Saving..." : "Create purchase order"}
 								</Button>
 							</div>
@@ -289,7 +289,7 @@ export function PurchaseOrders({
 															remaining,
 															productName: item.product_name,
 														});
-														setReceiptQuantity(remaining);
+												setReceiptQuantity(String(remaining));
 														setError("");
 													}}>
 													Receive stock
@@ -324,12 +324,12 @@ export function PurchaseOrders({
 							event.preventDefault();
 							if (
 								!receipt ||
-								!Number.isInteger(receiptQuantity) ||
-								receiptQuantity < 1 ||
-								receiptQuantity > receipt.remaining
+								!Number.isInteger(Number(receiptQuantity)) ||
+								Number(receiptQuantity) < 1 ||
+								Number(receiptQuantity) > receipt.remaining
 							)
 								return;
-							void receive(receipt.order, receipt.itemId, receiptQuantity);
+							void receive(receipt.order, receipt.itemId, Number(receiptQuantity));
 						}}
 						className="space-y-5">
 						<div className="space-y-2">
@@ -345,7 +345,7 @@ export function PurchaseOrders({
 								required
 								value={receiptQuantity}
 								onChange={(event) =>
-									setReceiptQuantity(Number(event.target.value))
+									setReceiptQuantity(event.target.value)
 								}
 							/>
 						</div>
@@ -362,9 +362,9 @@ export function PurchaseOrders({
 								disabled={
 									busy ||
 									!receipt ||
-									!Number.isInteger(receiptQuantity) ||
-									receiptQuantity < 1 ||
-									receiptQuantity > receipt.remaining
+									!Number.isInteger(Number(receiptQuantity)) ||
+									Number(receiptQuantity) < 1 ||
+									Number(receiptQuantity) > receipt.remaining
 								}>
 								{busy ? "Receiving..." : "Confirm receipt"}
 							</Button>

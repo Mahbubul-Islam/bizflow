@@ -48,7 +48,7 @@ type Actions = {
 	cancel: boolean;
 	invoice: boolean;
 };
-type Line = { product_id: string; quantity: number };
+type Line = { product_id: string; quantity: string };
 
 export function OrdersView({
 	orders,
@@ -69,7 +69,7 @@ export function OrdersView({
 }) {
 	const [editing, setEditing] = useState<Order | null>(null);
 	const [creating, setCreating] = useState(false);
-	const [items, setItems] = useState<Line[]>([{ product_id: "", quantity: 1 }]);
+	const [items, setItems] = useState<Line[]>([{ product_id: "", quantity: "1" }]);
 	const [customerId, setCustomerId] = useState("");
 	const [discount, setDiscount] = useState("0.00");
 	const [tax, setTax] = useState("0.00");
@@ -98,7 +98,7 @@ export function OrdersView({
 	function reset() {
 		setEditing(null);
 		setCreating(false);
-		setItems([{ product_id: "", quantity: 1 }]);
+		setItems([{ product_id: "", quantity: "1" }]);
 		setSelectedProducts([]);
 		setCustomerId("");
 		setDiscount("0.00");
@@ -111,7 +111,7 @@ export function OrdersView({
 		setItems(
 			order.items.map((item) => ({
 				product_id: item.product_id,
-				quantity: item.quantity,
+				quantity: String(item.quantity),
 			})),
 		);
 		setCustomerId(order.customer_id ?? "");
@@ -150,8 +150,8 @@ export function OrdersView({
 			items.some(
 				(item) =>
 					!item.product_id ||
-					!Number.isInteger(item.quantity) ||
-					item.quantity < 1,
+					!Number.isInteger(Number(item.quantity)) ||
+					Number(item.quantity) < 1,
 			) ||
 			new Set(items.map((item) => item.product_id)).size !== items.length
 		) {
@@ -168,7 +168,7 @@ export function OrdersView({
 				return (
 					!product ||
 					!product.is_active ||
-					product.stock_quantity < item.quantity
+					product.stock_quantity < Number(item.quantity)
 				);
 			})
 		) {
@@ -179,7 +179,7 @@ export function OrdersView({
 		}
 		const input: DraftOrderInput = {
 			customer_id: customerId || null,
-			items,
+			items: items.map((item) => ({ ...item, quantity: Number(item.quantity) })),
 			discount_amount: discount,
 			tax_amount: tax,
 			notes,
@@ -452,7 +452,7 @@ export function OrdersView({
 																? line
 																: {
 																		...line,
-																		quantity: Number(event.target.value),
+															quantity: event.target.value,
 																	},
 														),
 													)
@@ -483,7 +483,7 @@ export function OrdersView({
 									onClick={() =>
 										setItems((current) => [
 											...current,
-											{ product_id: "", quantity: 1 },
+											{ product_id: "", quantity: "1" },
 										])
 									}>
 									<Plus className="size-4" /> Add item
