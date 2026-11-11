@@ -195,10 +195,24 @@ class BulkProductImportTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Product.objects.get(sku="N-1").category, category)
 
-    def test_unknown_category_imports_nothing(self):
-        response = self.upload("name,sku,cost_price,selling_price,stock_quantity,category\nNotebook,N-1,10.00,15.00,12,Missing\n")
+    def test_import_creates_missing_categories_and_reuses_them(self):
+        response = self.upload("name,sku,cost_price,selling_price,stock_quantity,category\nNotebook,N-1,10.00,15.00,12,Electronics\nMouse,M-1,5.00,8.00,3,electronics\n")
+        self.assertEqual(response.status_code, 200)
+        category = Category.objects.get(organization=self.organization, name="Electronics")
+        self.assertEqual(Product.objects.filter(organization=self.organization, category=category).count(), 2)
+
+    def test_invalid_row_does_not_create_categories(self):
+        response = self.upload("name,sku,cost_price,selling_price,stock_quantity,category\nNotebook,N-1,10.00,15.00,12,Electronics\nBad,B-1,10.00,15.00,-1,Other\n")
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(Product.objects.filter(organization=self.organization).exists())
+        self.assertFalse(Category.objects.filter(organization=self.organization).exists())
+
+    def test_import_reactivates_existing_category(self):
+        category = Category.objects.create(organization=self.organization, name="Electronics", is_active=False)
+        response = self.upload("name,sku,cost_price,selling_price,stock_quantity,category\nMouse,M-1,5.00,8.00,3,electronics\n")
+        self.assertEqual(response.status_code, 200)
+        category.refresh_from_db()
+        self.assertTrue(category.is_active)
+        self.assertEqual(Product.objects.get(sku="M-1").category, category)
 
     def test_imports_excel_workbook(self):
         response = self.upload_xlsx()
@@ -216,8 +230,6 @@ class BulkProductImportTest(TestCase):
         response = self.upload_xlsx(shared_strings=True)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Product.objects.get(sku="X-1").stock_quantity, 12)
-
-
 class ProductCatalogPaginationTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(email="catalog@example.com", password="StrongPassword123!")
